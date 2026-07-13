@@ -18,7 +18,8 @@
 \usepackage{caption}
 \usepackage{hyperref}
 \usepackage{url}
-\usepackage{cite}
+\usepackage[backend=biber,style=ieee,sorting=none]{biblatex}
+\addbibresource{fuentes_primarias.bib}
 
 \usetikzlibrary{arrows.meta,positioning,fit,shapes.geometric}
 \geometry{top=2.5cm,bottom=2.5cm,left=2.7cm,right=2.7cm}
@@ -232,7 +233,6 @@ En síntesis, la postura adoptada es que la instancia única debe mantenerse dur
 
 Para la preparación de este informe se utilizaron Claude y OpenAI Codex como herramientas de apoyo. Claude fue empleado previamente para organizar y mejorar la claridad de un borrador inicial. OpenAI Codex se utilizó para inspeccionar la estructura del repositorio de TiendaTech, localizar evidencia de configuración de base de datos y transacciones, contrastar dicha evidencia con la documentación previa, proponer la estructura en LaTeX y revisar la coherencia técnica del texto. Las herramientas asistieron en el resumen, marco teórico, análisis, tabla comparativa y redacción. La selección de la postura, la validación de las afirmaciones sobre el PFC y la responsabilidad por el contenido final corresponden al autor, quien debe revisar el documento antes de entregarlo.
 
-\bibliographystyle{IEEEtran}
-\bibliography{fuentes_primarias}
+\printbibliography
 
 \end{document}
