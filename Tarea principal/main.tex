@@ -1,0 +1,238 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{cite}
+
+\usetikzlibrary{arrows.meta,positioning,fit,shapes.geometric}
+\geometry{top=2.5cm,bottom=2.5cm,left=2.7cm,right=2.7cm}
+\setstretch{1.15}
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0.25em}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  pdftitle={Análisis de consistencia y replicación en TiendaTech},
+  pdfauthor={José Alejandro Lozano Morales}
+}
+
+\definecolor{codegray}{RGB}{245,245,245}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codegray},
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  showstringspaces=false,
+  captionpos=b
+}
+
+\newcommand{\TiendaTech}{\textit{TiendaTech}}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  {\large UNIVERSIDAD TÉCNICA ESTATAL DE QUEVEDO\par}
+  \vspace{0.4cm}
+  {\large Facultad de Ciencias de la Computación\par}
+  {\large Carrera de Ingeniería de Software\par}
+  \vfill
+  {\Large\bfseries TA-IND-02\par}
+  \vspace{0.5cm}
+  {\LARGE\bfseries Análisis de Consistencia y Replicación en Bases de Datos Distribuidas\par}
+  \vspace{0.4cm}
+  {\Large Caso de estudio: AGLS -- TiendaTech\par}
+  \vfill
+  \begin{tabular}{rl}
+    \textbf{Estudiante:} & José Alejandro Lozano Morales \\
+    \textbf{Equipo PFC:} & AGLS -- TiendaTech \\
+    \textbf{Asignatura:} & Aplicaciones Distribuidas (ISR-701) \\
+    \textbf{Unidad:} & 3 -- Bases de Datos Distribuidas \\
+    \textbf{Docente:} & Prof. Guerrero Ulloa G.C. \\
+    \textbf{Período:} & 2026--2027 \\
+    \textbf{Fecha:} & 12 de julio de 2026
+  \end{tabular}
+  \vfill
+\end{titlepage}
+
+\pagenumbering{arabic}
+
+\section*{Resumen}
+\addcontentsline{toc}{section}{Resumen}
+El presente informe analiza el modelo de consistencia y replicación realmente implementado en el PFC AGLS--TiendaTech, una plataforma de comercio electrónico de hardware con asistente de compatibilidad. La inspección del código y del despliegue evidencia una aplicación Spring Boot conectada a una única instancia PostgreSQL, con una sola fuente de datos y uso generalizado del esquema \texttt{public}; por tanto, aún no existen réplicas físicas ni separación efectiva por esquemas. El sistema obtiene consistencia transaccional local del motor, pero sus garantías exactas frente a operaciones concurrentes dependen del aislamiento, los bloqueos y las funciones almacenadas, cuya definición no está incluida en el repositorio. Se contrasta este modelo con dos alternativas: replicación primario--seguidor con réplica de lectura y failover, y base de datos por servicio con coordinación mediante Saga. Se concluye que el modelo actual es razonable para la fase académica por su simplicidad y atomicidad local, pero no es óptimo para un despliegue real debido al punto único de fallo. Se recomienda una evolución incremental hacia primario--seguidor, manteniendo consistencia fuerte en inventario, pedidos y pagos.
+
+\section{Introducción}
+
+\TiendaTech{} es una plataforma nacional de comercio electrónico especializada en componentes informáticos. Su diferenciador funcional es un asistente que valida la compatibilidad entre procesadores, placas base, memorias, tarjetas gráficas, almacenamiento y fuentes de poder antes de que el cliente finalice una compra. El dominio combina consultas intensivas de catálogo con operaciones críticas de inventario, carrito, pedidos, pagos y facturación. Una lectura obsoleta en el catálogo puede ser tolerable durante un intervalo breve; en cambio, una lectura obsoleta del inventario durante el checkout puede provocar sobreventa, cobros sin producto disponible o pedidos imposibles de cumplir.
+
+La documentación inicial del PFC propone seis dominios: Usuarios y Seguridad, Productos, Inventario, Pedidos, Ventas, y Órdenes y Proveedores. Como evolución arquitectónica, el equipo ha planteado que cada dominio utilice un esquema propio dentro de una única instancia PostgreSQL. Sin embargo, la consigna del TA-IND-02 exige estudiar el modelo \emph{realmente implementado}, no únicamente el plan futuro. Por esta razón, el análisis se fundamenta en evidencia del repositorio: \texttt{docker-compose.yml}, \texttt{application.properties}, las entidades JPA, los servicios y las consultas SQL presentes en el código.
+
+La pregunta orientadora es: \textbf{¿el modelo de consistencia elegido es óptimo para el dominio de TiendaTech?} Para responderla se distinguen tres niveles que no deben confundirse: la implementación actual, la evolución lógica por esquemas y las posibles arquitecturas con réplicas físicas. El objetivo es caracterizar las garantías observables, evaluar sus compromisos bajo CAP y PACELC, y comparar dos alternativas mediante criterios de consistencia, disponibilidad, latencia, tolerancia a particiones y complejidad operativa.
+
+\section{Marco teórico}
+
+\subsection{Espectro de modelos de consistencia}
+
+La consistencia distribuida representa un espectro de garantías y no una propiedad binaria \cite{viotti2016consistency}. La \emph{linealizabilidad} exige que cada operación parezca ocurrir instantáneamente entre su invocación y su respuesta, respetando el orden del tiempo real. La \emph{consistencia secuencial} conserva un orden total común para todos los procesos, pero no exige que dicho orden coincida con el tiempo real. La \emph{consistencia causal} preserva el orden de las operaciones causalmente relacionadas, mientras permite órdenes diferentes para operaciones concurrentes e independientes. Las garantías de sesión, como \emph{read-your-writes}, aseguran que un cliente observe sus propias modificaciones. Finalmente, la \emph{consistencia eventual} garantiza convergencia en ausencia de nuevas escrituras, sin prometer que una lectura inmediata obtenga el valor más reciente.
+
+Estas definiciones se aplican principalmente cuando existen varias copias de un dato. En una base de datos con una sola copia no existe divergencia entre réplicas ni retraso de propagación. No obstante, aún es necesario analizar el aislamiento entre transacciones concurrentes. PostgreSQL ofrece atomicidad, consistencia, aislamiento y durabilidad (ACID), pero el nivel de aislamiento determina qué anomalías pueden observarse. Una transacción ejecutada bajo \texttt{READ COMMITTED} no equivale automáticamente a una ejecución serializable ni permite afirmar que toda la aplicación sea linealizable.
+
+\subsection{CAP y PACELC}
+
+El teorema CAP formaliza que, cuando se produce una partición de red, un sistema replicado no puede garantizar simultáneamente disponibilidad para todas las solicitudes y una vista consistente de los datos \cite{gilbert2002brewer}. La formulación no significa que un sistema elija permanentemente dos letras de tres; describe la decisión que debe tomar durante una partición.
+
+PACELC amplía el análisis: si existe una partición, se elige entre disponibilidad y consistencia; de lo contrario, en operación normal, se elige entre latencia y consistencia \cite{abadi2012pacelc}. Dynamo representa una decisión orientada a disponibilidad y convergencia eventual \cite{decandia2007dynamo}, mientras Spanner emplea coordinación y sincronización temporal para ofrecer consistencia externa global \cite{corbett2013spanner}. En una instancia única, CAP no se manifiesta como un conflicto entre réplicas: ante la pérdida de acceso al único nodo, el servicio queda indisponible. PACELC tampoco presenta todavía un intercambio de latencia por coordinación entre copias, aunque sí existen costos de bloqueo y contención entre transacciones.
+
+\subsection{Estrategias de replicación}
+
+En la replicación primario--seguidor, un nodo acepta las escrituras y propaga sus cambios a uno o más seguidores. La propagación síncrona reduce el riesgo de pérdida y puede sostener garantías fuertes, pero añade latencia a cada confirmación. La propagación asíncrona reduce la latencia de escritura, aunque las lecturas dirigidas a seguidores pueden ser obsoletas. Las propuestas recientes intentan reducir este compromiso mediante nuevas topologías y paralelismo sin renunciar a la consistencia fuerte \cite{altukhaim2022multidirectional}.
+
+En la replicación multilíder, varios nodos aceptan escrituras y requieren resolución de conflictos. En los sistemas sin líder, las lecturas y escrituras se realizan sobre subconjuntos de réplicas. Los quórums permiten obtener consistencia fuerte y tolerancia a fallos cuando se coordinan adecuadamente; QuorumX, por ejemplo, combina replicación de logs y reproducción eficiente para cargas OLTP \cite{wang2022quorumx}. Estas estrategias aumentan la disponibilidad, pero también la complejidad de operación, monitoreo, recuperación y pruebas.
+
+\subsection{Separación lógica y distribución física}
+
+Un esquema de PostgreSQL es un espacio de nombres dentro de una misma instancia. Separar tablas en \texttt{productos}, \texttt{inventario} o \texttt{ventas} mejora la propiedad lógica y permite asignar permisos, pero no genera nodos independientes ni copias de los datos. Tampoco constituye, por sí solo, replicación o tolerancia a particiones.
+
+Debe distinguirse además entre separación por dominio y fragmentación vertical clásica. La fragmentación vertical divide las columnas de una misma relación conservando una clave que permita reconstruirla. Agrupar tablas completas por dominio corresponde mejor al patrón \emph{schema-per-service}. La partición de una tabla de ventas por rangos de fecha sí puede considerarse fragmentación horizontal lógica, pero mientras todos los fragmentos permanezcan en el mismo motor no existe distribución física.
+
+\section{Análisis del modelo implementado en TiendaTech}
+
+\subsection{Evidencia obtenida del repositorio}
+
+El archivo \texttt{docker-compose.yml} declara solamente dos contenedores: una aplicación y una instancia \texttt{postgres:17}. Existe un único volumen persistente, \texttt{postgres\_data}, y no aparecen nodos primarios, seguidores, balanceadores o servicios de failover. La aplicación configura una única conexión mediante \texttt{spring.datasource.url}, \texttt{spring.datasource.username} y \texttt{spring.datasource.password}. Además, Hibernate fija \texttt{public} como esquema predeterminado.
+
+La evidencia del código coincide con esa configuración. Las consultas invocan objetos como \texttt{public.usuario}, \texttt{public.producto}, \texttt{public.movimiento\_inventario}, \texttt{public.f\_carrito\_agregar} y \texttt{public.f\_checkout\_generar\_orden\_json}. No se encontraron los seis esquemas propuestos en la documentación, configuraciones de múltiples fuentes de datos, enrutamiento de lecturas, réplicas o parámetros de PostgreSQL como \texttt{primary\_conninfo}, \texttt{standby.signal} o \texttt{synchronous\_standby\_names}.
+
+También se observa un solo proyecto Maven, un solo artefacto Spring Boot y un solo proceso backend. Las clases denominadas \texttt{ProductoService}, \texttt{CarritoService} o \texttt{PaymentService} son servicios internos de la misma aplicación, no microservicios desplegables de forma independiente. En consecuencia, la implementación actual es un monolito modular con una base centralizada.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=12mm and 18mm,
+    box/.style={draw,rounded corners,align=center,minimum width=35mm,minimum height=10mm,fill=blue!5},
+    db/.style={draw,cylinder,shape border rotate=90,aspect=0.25,align=center,minimum width=37mm,minimum height=16mm,fill=green!8},
+    plan/.style={draw,dashed,rounded corners,align=center,minimum width=24mm,minimum height=8mm,fill=orange!7},
+    arr/.style={-{Latex[length=2mm]},thick}
+  ]
+    \node[box] (web) {Cliente web};
+    \node[box,below=of web] (app) {Aplicación Spring Boot\\único despliegue};
+    \node[db,below=of app] (pg) {PostgreSQL 17\\esquema \texttt{public}};
+    \draw[arr] (web) -- node[right]{HTTPS/REST} (app);
+    \draw[arr] (app) -- node[right]{JDBC/JPA} (pg);
+
+    \node[plan,right=28mm of pg] (users) {usuarios};
+    \node[plan,above=5mm of users] (products) {productos};
+    \node[plan,below=5mm of users] (inventory) {inventario};
+    \node[plan,right=7mm of products] (orders) {pedidos};
+    \node[plan,right=7mm of users] (sales) {ventas};
+    \node[plan,right=7mm of inventory] (suppliers) {proveedores};
+    \node[draw,dashed,fit=(users)(products)(inventory)(orders)(sales)(suppliers),inner sep=4mm,label=above:{\small Evolución planificada, aún no implementada}] (future) {};
+    \draw[dashed,-{Latex[length=2mm]}] (pg.east) -- node[above,sloped]{separación lógica futura} (future.west);
+  \end{tikzpicture}
+  \caption{Topología propia basada en la evidencia del repositorio: instancia única y esquema \texttt{public}; a la derecha se representa la separación lógica planificada.}
+  \label{fig:topologia-actual}
+\end{figure}
+
+La Figura~\ref{fig:topologia-actual} muestra la diferencia entre el estado verificable y la intención del equipo. Esta distinción evita atribuir al sistema una topología distribuida inexistente.
+
+\subsection{Garantías de consistencia observables}
+
+El modelo implementado obtiene consistencia transaccional local de PostgreSQL. Una escritura confirmada y una lectura posterior dirigida a la misma instancia no sufren retraso de replicación. Varias operaciones utilizan \texttt{@Transactional}, lo que permite agrupar modificaciones dentro de una unidad atómica. Sin embargo, no se encontró una selección explícita de \texttt{SERIALIZABLE}, \texttt{REPEATABLE\_READ} o bloqueos pesimistas y optimistas. Tampoco aparecen anotaciones \texttt{@Version}, \texttt{@Lock} o consultas \texttt{FOR UPDATE} en el código Java.
+
+La operación de checkout invoca la función \texttt{public.f\_checkout\_generar\_orden\_json}. Al ser una única sentencia enviada a PostgreSQL, su ejecución ocurre dentro de una transacción del motor; no obstante, el repositorio no contiene la definición SQL de la función. Por ello, no puede demostrarse desde el código disponible si el checkout bloquea el inventario, valida el stock y lo descuenta mediante una actualización condicional, o si puede producir sobreventa frente a dos compras concurrentes.
+
+La conclusión técnicamente prudente es que el sistema no implementa un modelo de consistencia entre réplicas. Implementa garantías ACID locales, cuya fortaleza efectiva depende del aislamiento predeterminado y de procedimientos almacenados no auditables desde el repositorio. Etiquetar toda la aplicación como linealizable sería una afirmación sin evidencia suficiente.
+
+\subsection{Relación con el dominio y lectura CAP/PACELC}
+
+El modelo centralizado simplifica el caso crítico de negocio: inventario, pedido, venta y factura pueden modificarse dentro del mismo motor sin una transacción distribuida. Esto reduce latencia y evita coordinar múltiples bases. Para una fase académica y una carga pequeña, la simplicidad tiene valor porque facilita pruebas y recuperación.
+
+El costo es la disponibilidad. PostgreSQL constituye un punto único de fallo: si el contenedor, el host o el volumen quedan inaccesibles, los módulos dejan de operar simultáneamente. El sistema no es tolerante a particiones y no puede ofrecer servicio desde una segunda copia. En términos de PACELC, todavía no existe el intercambio normal entre latencia y consistencia derivado de coordinar réplicas; sí existe contención, pues catálogo, reportes y checkout compiten por conexiones, CPU, memoria y almacenamiento.
+
+Los requisitos tampoco son homogéneos. Inventario, confirmación de pedidos, pagos y facturación requieren datos actuales y operaciones atómicas. Catálogo, imágenes, productos populares y recomendaciones toleran mejor un retraso acotado. Esta diferencia favorece una arquitectura híbrida futura: las operaciones críticas deben permanecer en el primario, mientras consultas no críticas pueden escalarse mediante seguidores de lectura o cachés controladas.
+
+\section{Evaluación de alternativas}
+
+\subsection{Alternativa A: primario--seguidor con failover}
+
+La primera alternativa conserva una sola fuente autorizada para escrituras y añade uno o más seguidores mediante streaming replication. El checkout, inventario, pagos y pedidos se ejecutan en el primario. Las consultas tolerantes a obsolescencia, como catálogo o reportes, pueden dirigirse a un seguidor. Estudios experimentales muestran que los niveles de consistencia elegidos en bases NoSQL y distribuidas afectan directamente latencia y rendimiento \cite{ferreira2025benchmarking}; por ello, el enrutamiento debe decidirse por operación, no globalmente.
+
+Una réplica asíncrona reduce el costo de las escrituras, pero puede devolver valores atrasados. No debe utilizarse para verificar stock inmediatamente antes de vender. Una réplica síncrona disminuye la ventana de pérdida, aunque incrementa la latencia. Para resolver el punto único de fallo no basta una réplica de lectura: se requiere promoción automática, monitoreo y un mecanismo de redirección. Esta alternativa es incremental y mantiene la ventaja de las transacciones locales.
+
+\subsection{Alternativa B: base de datos por servicio y Saga}
+
+La segunda alternativa separa físicamente los dominios. Cada microservicio es propietario de su base y se comunica mediante API o eventos. Una venta que afecte inventario, pedidos y facturación deja de ser una transacción ACID única; se transforma en una Saga con pasos locales y acciones compensatorias. Si el cobro se confirma pero falla el descuento de inventario, el sistema debe reintentar, reservar previamente el producto o ejecutar una devolución.
+
+La ventaja es el aislamiento: una carga intensa de catálogo no utiliza necesariamente los mismos recursos que pagos. También permite escalar y desplegar cada dominio de forma independiente. La desventaja es la consistencia eventual entre servicios, la dificultad de observabilidad y la necesidad de idempotencia, colas, reintentos y compensaciones. Para la fase actual, esta complejidad excede los beneficios inmediatos.
+
+\begin{table}[htbp]
+\centering
+\caption{Comparación del modelo implementado con dos alternativas.}
+\label{tab:comparacion}
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.5cm}XXX}
+\toprule
+\textbf{Criterio} & \textbf{Actual: instancia única} & \textbf{A: primario--seguidor} & \textbf{B: BD por servicio + Saga} \\
+\midrule
+Consistencia & ACID local; sin divergencia entre copias; aislamiento no explicitado & Fuerte en el primario; posible \emph{staleness} en seguidores asíncronos & ACID dentro de cada servicio; eventual entre servicios \\
+Disponibilidad & Baja ante fallo de la instancia & Alta si existe promoción y redirección automáticas & Alta por dominio; fallos parciales posibles \\
+Latencia & Baja, sin coordinación remota; posible contención & Mayor en replicación síncrona; lecturas escalables & Baja localmente, pero mayor en flujos coordinados \\
+Particiones & No toleradas; pérdida de acceso implica indisponibilidad & Puede priorizar consistencia o lecturas disponibles según configuración & Aislamiento parcial; depende del bus y políticas de cada servicio \\
+Complejidad & Baja & Moderada: réplica, monitoreo, failover y enrutamiento & Alta: eventos, idempotencia, Saga y compensaciones \\
+Adecuación & Fase académica y tráfico reducido & Mejor evolución a corto y mediano plazo & Evolución futura si la escala justifica el costo \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+La Tabla~\ref{tab:comparacion} muestra que la alternativa A ofrece el mejor equilibrio inmediato. Las arquitecturas recientes también demuestran que es posible combinar replicación, consistencia fuerte y alto rendimiento mediante diseños especializados \cite{krechowicz2025layered}, pero su complejidad no se justifica todavía en TiendaTech. La consistencia eventual estudiada en entornos de sincronización distribuida \cite{zhao2025acc} resulta más apropiada para datos tolerantes a retraso que para la confirmación de inventario y cobro.
+
+\section{Discusión crítica}
+
+El modelo implementado no es óptimo para el dominio completo de TiendaTech, aunque sí es razonable para su etapa académica. Su principal ventaja es que concentra las operaciones críticas en un motor transaccional. Esto evita, por ahora, la complejidad de las transacciones distribuidas. Su principal defecto es que las metas declaradas de alta disponibilidad y tolerancia a fallos no están respaldadas por la topología: una instancia única no ofrece continuidad ante la caída del nodo.
+
+La evolución por esquemas mejora la organización, pero no corrige ese defecto. Crear seis esquemas dentro del mismo PostgreSQL no añade copias, no distribuye carga entre servidores y no proporciona failover. Además, si los servicios acceden directamente a tablas de otros esquemas para compartir una transacción, conservan atomicidad pero aumentan el acoplamiento. Si se comunican únicamente por REST, respetan mejor los límites de servicio, pero una transacción local ya no cubre el proceso completo.
+
+La recomendación es adoptar una política diferenciada. Inventario, pagos, pedidos y facturación deben leer y escribir en el primario con transacciones explícitas y control de concurrencia. El checkout debe verificarse mediante la definición SQL de \texttt{f\_checkout\_generar\_orden\_json}; idealmente debe bloquear la fila de inventario o ejecutar una actualización condicional que solo descuente unidades cuando exista stock suficiente. El catálogo, los reportes y las recomendaciones pueden dirigirse a una réplica asíncrona con retraso monitoreado.
+
+Antes de incorporar replicación debe cerrarse la brecha de reproducibilidad del repositorio: faltan migraciones o scripts SQL con tablas, restricciones, funciones y procedimientos. Sin esos artefactos no es posible auditar integralmente la consistencia, reconstruir la base o verificar el comportamiento concurrente. También deben definirse métricas: retraso máximo de réplica, objetivo de recuperación, pérdida de datos tolerable, latencia P95 del checkout y tasa de conflictos de stock.
+
+En síntesis, la postura adoptada es que la instancia única debe mantenerse durante la fase académica, documentándola honestamente como arquitectura centralizada. La primera evolución debe ser primario--seguidor con failover, no una separación inmediata en seis bases. Esta decisión preserva la atomicidad local y mejora la disponibilidad con un costo operativo moderado. Una arquitectura por servicio y Saga queda como alternativa futura si el crecimiento y la independencia de equipos justifican su complejidad.
+
+\section{Conclusiones}
+
+\begin{enumerate}[leftmargin=*]
+  \item La implementación inspeccionada consta de una aplicación Spring Boot y una sola instancia PostgreSQL. No existen microservicios desplegables de manera independiente, réplicas físicas ni configuración de propagación de datos.
+  \item Los datos y procedimientos utilizados por el código se encuentran en el esquema \texttt{public}. La separación en seis esquemas es una decisión planificada, no una característica implementada; además, representa aislamiento lógico, no replicación ni distribución física.
+  \item El modelo de consistencia observable corresponde a garantías transaccionales locales de PostgreSQL. No hay evidencia suficiente para clasificar toda la aplicación como linealizable o serializable, pues no se configura un aislamiento explícito y faltan las definiciones de las funciones almacenadas.
+  \item La instancia única simplifica la atomicidad de inventario, venta, pedido y factura, pero constituye un punto único de fallo. En consecuencia, el modelo es adecuado para la fase académica, pero no es óptimo para tráfico real ni cumple por sí solo los objetivos de alta disponibilidad.
+  \item La alternativa recomendada es una evolución primario--seguidor con failover automático y enrutamiento selectivo: operaciones críticas en el primario y consultas tolerantes a obsolescencia en seguidores. La base por servicio con Saga se reserva para una etapa de mayor escala.
+  \item Como mitigación inmediata, el equipo debe versionar los scripts SQL, documentar el aislamiento, verificar el control concurrente del stock y definir métricas de recuperación, retraso de réplica y latencia del checkout.
+\end{enumerate}
+
+\section{Declaración de uso de IA generativa}
+
+Para la preparación de este informe se utilizaron Claude y OpenAI Codex como herramientas de apoyo. Claude fue empleado previamente para organizar y mejorar la claridad de un borrador inicial. OpenAI Codex se utilizó para inspeccionar la estructura del repositorio de TiendaTech, localizar evidencia de configuración de base de datos y transacciones, contrastar dicha evidencia con la documentación previa, proponer la estructura en LaTeX y revisar la coherencia técnica del texto. Las herramientas asistieron en el resumen, marco teórico, análisis, tabla comparativa y redacción. La selección de la postura, la validación de las afirmaciones sobre el PFC y la responsabilidad por el contenido final corresponden al autor, quien debe revisar el documento antes de entregarlo.
+
+\bibliographystyle{IEEEtran}
+\bibliography{fuentes_primarias}
+
+\end{document}
