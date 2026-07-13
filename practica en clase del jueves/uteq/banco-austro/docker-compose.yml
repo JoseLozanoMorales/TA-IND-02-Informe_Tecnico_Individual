@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: banco
       POSTGRES_PASSWORD: banco123
     ports:
-      - "5434:5432"
+      - "5442:5432"
     volumes:
       - vol-cuenca:/var/lib/postgresql/data
       - ./sql-cuenca:/docker-entrypoint-initdb.d
@@ -22,7 +22,7 @@ services:
       POSTGRES_USER: banco
       POSTGRES_PASSWORD: banco123
     ports:
-      - "5433:5432"
+      - "5443:5432"
     volumes:
       - vol-quito:/var/lib/postgresql/data
       - ./sql-quito:/docker-entrypoint-initdb.d
