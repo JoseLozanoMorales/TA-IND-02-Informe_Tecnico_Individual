@@ -7,10 +7,10 @@ spring:
 
 datasources:
   cuenca:
-    url: jdbc:postgresql://localhost:5434/banco_cuenca
+    url: jdbc:postgresql://localhost:5442/banco_cuenca
     username: banco
     password: banco123
   quito:
-    url: jdbc:postgresql://localhost:5433/banco_quito
+    url: jdbc:postgresql://localhost:5443/banco_quito
     username: banco
     password: banco123

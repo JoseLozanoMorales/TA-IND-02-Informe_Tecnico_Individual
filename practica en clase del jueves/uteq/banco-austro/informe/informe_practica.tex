@@ -1,0 +1,249 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+
+\geometry{top=2.5cm,bottom=2.5cm,left=3cm,right=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue!45!black,urlcolor=blue!55!black}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.7em}
+\renewcommand{\arraystretch}{1.2}
+
+% Completar estos datos antes de entregar.
+\newcommand{\estudiante}{José Alejandro Lozano Morales}
+\newcommand{\docente}{Ph.D. Gleiston Guerrero Ulloa}
+\newcommand{\asignatura}{Aplicaciones Distribuidas (ISR-701)}
+\newcommand{\periodo}{2026-2027 SPA}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Banco del Austro}
+\rhead{Bases de Datos Distribuidas}
+\cfoot{\thepage}
+\setlength{\headheight}{15pt}
+
+% Inserta una captura si existe; en caso contrario muestra un recuadro pendiente.
+\newcommand{\evidencia}[3]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{evidencias/#1}{%
+      \includegraphics[width=0.92\textwidth,height=0.68\textheight,keepaspectratio]{evidencias/#1}%
+    }{%
+      \fbox{\parbox[c][4.2cm][c]{0.86\textwidth}{\centering
+      \textbf{Evidencia pendiente}\\[0.5em]
+      Guardar la captura como \,\texttt{informe/evidencias/#1}}}%
+    }
+    \caption{#2}
+    \label{fig:#3}
+  \end{figure}
+}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  {\large Universidad Técnica Estatal de Quevedo\par}
+  \vspace{0.3cm}
+  {\large Facultad de Ciencias de la Computación\par}
+  {\large Carrera de Ingeniería de Software\par}
+  \vfill
+  {\Huge\bfseries Informe técnico individual\par}
+  \vspace{0.4cm}
+  {\LARGE\bfseries Práctica de Bases de Datos Distribuidas\par}
+  \vspace{0.25cm}
+  {\Large Caso: Banco del Austro\par}
+  \vfill
+  \begin{tabular}{>{\bfseries}l l}
+    Estudiante: & \estudiante \\
+    Asignatura: & \asignatura \\
+    Docente: & \docente \\
+    Período académico: & \periodo \\
+    Fecha: & \today
+  \end{tabular}
+  \vfill
+  {Quevedo - Ecuador\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Resumen}
+
+En esta práctica se implementó un prototipo de base de datos distribuida para dos oficinas del Banco del Austro: Cuenca y Quito. Cada sede utiliza una instancia independiente de PostgreSQL 16 desplegada mediante Docker. Una aplicación desarrollada con Spring Boot consulta ambos nodos y selecciona la ubicación de una cuenta a partir de su prefijo. Las cuentas que empiezan con 22 pertenecen a Cuenca y las que empiezan con 17 pertenecen a Quito.
+
+La solución permitió comprobar la fragmentación horizontal, la transparencia de ubicación y la autonomía local. Las pruebas funcionales confirmaron la consulta correcta de saldos en ambos nodos, la recuperación conjunta de seis clientes y la continuidad de las consultas de Cuenca durante una interrupción controlada del nodo Quito.
+
+\textbf{Palabras clave:} base de datos distribuida, fragmentación horizontal, PostgreSQL, Docker, Spring Boot, autonomía local.
+
+\section{Introducción}
+
+Una base de datos distribuida almacena información en varios nodos físicos o lógicos, pero busca ofrecer al usuario una vista unificada del sistema. Esta organización permite acercar los datos a las sedes que los utilizan, distribuir la carga y mantener operaciones locales cuando otro nodo no está disponible.
+
+El caso propuesto representa dos oficinas del Banco del Austro. La información de cuentas y transacciones se separa por oficina, mientras que la aplicación cliente oculta la ubicación física de cada registro. El consumidor de la API utiliza una sola dirección y no necesita conocer qué instancia PostgreSQL atiende la petición.
+
+\section{Objetivos}
+
+\subsection{Objetivo general}
+
+Implementar un prototipo de base de datos distribuida para consultar información bancaria almacenada en dos nodos PostgreSQL independientes.
+
+\subsection{Objetivos específicos}
+
+\begin{itemize}
+  \item Desplegar los nodos de Cuenca y Quito mediante Docker Compose.
+  \item Aplicar fragmentación horizontal a cuentas y transacciones según su oficina.
+  \item Configurar dos fuentes de datos en una aplicación Spring Boot.
+  \item Enrutar las consultas mediante los prefijos 22 y 17.
+  \item Exponer endpoints REST para consultar saldos y clientes.
+  \item Verificar la autonomía local mediante la interrupción temporal de un nodo.
+\end{itemize}
+
+\section{Fundamentos de la distribución}
+
+\subsection{Nodos y sedes}
+
+Cada sede corresponde a un nodo PostgreSQL autónomo. El nodo Cuenca administra la base de datos \texttt{banco\_cuenca}, mientras que el nodo Quito administra \texttt{banco\_quito}. Los datos se almacenan en volúmenes separados para conservarlos aunque los contenedores sean detenidos o recreados.
+
+\subsection{Estrategia de fragmentación}
+
+La tabla \texttt{cuentas} se fragmenta horizontalmente por oficina. El nodo Cuenca acepta únicamente filas cuya oficina sea \texttt{CUENCA}; el nodo Quito aplica la misma regla con \texttt{QUITO}. Las restricciones \texttt{CHECK} protegen esta condición directamente en el motor de base de datos.
+
+\begin{table}[H]
+  \centering
+  \caption{Distribución de información por nodo}
+  \begin{tabular}{lll}
+    \toprule
+    Nodo & Prefijo de cuenta & Oficina \\
+    \midrule
+    Cuenca & 22 & CUENCA \\
+    Quito & 17 & QUITO \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Arquitectura de la solución}
+
+La solución está formada por dos contenedores PostgreSQL y una aplicación Spring Boot. Aunque ambos motores escuchan en el puerto interno 5432, Docker los publica en puertos diferentes de la computadora anfitriona.
+
+\begin{table}[H]
+  \centering
+  \caption{Componentes y puertos utilizados}
+  \begin{tabular}{>{\raggedright\arraybackslash}p{4cm}p{4cm}p{5cm}}
+    \toprule
+    Componente & Dirección & Responsabilidad \\
+    \midrule
+    PostgreSQL Cuenca & \texttt{localhost:5442} & Cuentas con prefijo 22 \\
+    PostgreSQL Quito & \texttt{localhost:5443} & Cuentas con prefijo 17 \\
+    Aplicación Spring Boot & \texttt{localhost:8080} & API REST y enrutamiento \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Los puertos externos 5442 y 5443 siguen la alternativa indicada en la guía para equipos donde el puerto 5432 ya está ocupado por una instalación local de PostgreSQL. Los puertos internos de los contenedores no fueron modificados.
+
+\section{Implementación}
+
+\subsection{Despliegue de PostgreSQL}
+
+El archivo \texttt{docker-compose.yml} declara los servicios \texttt{db-cuenca} y \texttt{db-quito}, sus credenciales académicas, volúmenes persistentes, scripts de inicialización y una red común. Los archivos \texttt{01\_schema.sql} crean la estructura y los archivos \texttt{02\_datos.sql} insertan los registros de prueba.
+
+\subsection{Configuración de Spring Boot}
+
+La clase \texttt{DataSourceConfig} construye dos objetos \texttt{DataSource}. La configuración de conexión se encuentra en \texttt{application.yml}. El servicio \texttt{ConsultaDistribuidaService} crea un \texttt{JdbcTemplate} por sede y selecciona uno mediante los dos primeros caracteres del número de cuenta.
+
+\subsection{API REST}
+
+La clase \texttt{BancoController} publica los siguientes endpoints:
+
+\begin{table}[H]
+  \centering
+  \caption{Endpoints implementados}
+  \begin{tabular}{p{8.2cm}p{5.2cm}}
+    \toprule
+    Endpoint & Resultado \\
+    \midrule
+    \texttt{GET /api/banco/saldo/2201000001} & Saldo almacenado en Cuenca \\
+    \texttt{GET /api/banco/saldo/1701000001} & Saldo almacenado en Quito \\
+    \texttt{GET /api/banco/clientes} & Unión de clientes de ambos nodos \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Pruebas y resultados}
+
+\subsection{Estado inicial de los nodos}
+
+Docker Compose levantó correctamente ambos contenedores. Cuenca quedó publicado en el puerto 5442 y Quito en el puerto 5443.
+
+\evidencia{01_contenedores_activos.png}{Contenedores de Cuenca y Quito en ejecución.}{contenedores}
+
+\subsection{Consulta del nodo Cuenca}
+
+La petición de la cuenta \texttt{2201000001} devolvió HTTP 200, un saldo de 15000.00 y la oficina \texttt{CUENCA}.
+
+\evidencia{02_saldo_cuenca.png}{Consulta de saldo dirigida al nodo Cuenca.}{saldo-cuenca}
+
+\subsection{Consulta del nodo Quito}
+
+La petición de la cuenta \texttt{1701000001} devolvió HTTP 200, un saldo de 8000.00 y la oficina \texttt{QUITO}.
+
+\evidencia{03_saldo_quito.png}{Consulta de saldo dirigida al nodo Quito.}{saldo-quito}
+
+\subsection{Consulta distribuida de clientes}
+
+El endpoint de clientes devolvió seis registros: tres almacenados en Cuenca y tres almacenados en Quito.
+
+\evidencia{04_clientes_distribuidos.png}{Clientes recuperados desde los dos nodos.}{clientes}
+
+\subsection{Prueba de autonomía local}
+
+El contenedor de Quito fue detenido de manera controlada. Durante la interrupción, la consulta de una cuenta de Cuenca continuó respondiendo con HTTP 200. La consulta dirigida a Quito devolvió HTTP 500, resultado esperado porque el prototipo no incorpora todavía un mecanismo de réplica o \textit{fallback} para cuentas de una sede caída. Después de la prueba, Quito fue iniciado nuevamente y recuperó su operación normal.
+
+\evidencia{05_quito_detenido.png}{Nodo Quito detenido durante la prueba de fallos.}{quito-detenido}
+\evidencia{06_autonomia_cuenca.png}{Cuenca continúa respondiendo mientras Quito está detenido.}{autonomia-cuenca}
+
+\section{Análisis de resultados}
+
+Los resultados demuestran transparencia de ubicación porque el consumidor siempre consulta la misma API. La selección del nodo ocurre internamente y depende del prefijo de la cuenta. También se comprueba la disjunción de los fragmentos: cada sede acepta únicamente cuentas asociadas con su oficina.
+
+La caída de Quito no impidió consultar cuentas de Cuenca, lo que evidencia autonomía local. Sin embargo, el endpoint de clientes depende actualmente de ambos nodos y falla si uno no está disponible. Esta limitación podría abordarse posteriormente mediante un patrón Circuit Breaker, una respuesta parcial controlada o replicación efectiva de los datos compartidos.
+
+\section{Conclusiones}
+
+\begin{enumerate}
+  \item Se desplegaron correctamente dos motores PostgreSQL independientes y persistentes.
+  \item La fragmentación horizontal permitió asignar las cuentas a una sede mediante restricciones verificables en la base de datos.
+  \item Spring Boot ofreció transparencia de ubicación al concentrar el acceso en una sola API REST.
+  \item Las consultas de Cuenca y Quito devolvieron los saldos esperados y la consulta conjunta recuperó seis clientes.
+  \item La prueba de fallos confirmó que un nodo disponible puede continuar atendiendo sus datos locales cuando el otro se encuentra detenido.
+\end{enumerate}
+
+\section{Recomendaciones}
+
+\begin{itemize}
+  \item Incorporar manejo global de excepciones para devolver mensajes controlados cuando un nodo no esté disponible.
+  \item Implementar un Circuit Breaker para evitar esperas repetidas ante fallos de conexión.
+  \item Evaluar replicación lógica para información que deba estar disponible en todas las sedes.
+  \item Utilizar variables de entorno o secretos para administrar credenciales en ambientes no académicos.
+\end{itemize}
+
+\section{Referencias}
+
+\begin{enumerate}
+  \item Guerrero Ulloa, G. \textit{Práctica de Bases de Datos Distribuidas: Caso Banco del Austro}. Universidad Técnica Estatal de Quevedo, 2026.
+  \item PostgreSQL Global Development Group. \textit{PostgreSQL 16 Documentation}. \url{https://www.postgresql.org/docs/16/}
+  \item Docker Inc. \textit{Docker Compose Documentation}. \url{https://docs.docker.com/compose/}
+  \item VMware. \textit{Spring Boot Reference Documentation}. \url{https://docs.spring.io/spring-boot/}
+\end{enumerate}
+
+\end{document}
