@@ -6,6 +6,7 @@
 \usepackage{lmodern}
 \usepackage{geometry}
 \usepackage{graphicx}
+\setkeys{Gin}{draft=false}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{float}
@@ -19,7 +20,6 @@
 \setlength{\parskip}{0.7em}
 \renewcommand{\arraystretch}{1.2}
 
-% Completar estos datos antes de entregar.
 \newcommand{\estudiante}{José Alejandro Lozano Morales}
 \newcommand{\docente}{Ph.D. Gleiston Guerrero Ulloa}
 \newcommand{\asignatura}{Aplicaciones Distribuidas (ISR-701)}
@@ -32,12 +32,11 @@
 \cfoot{\thepage}
 \setlength{\headheight}{15pt}
 
-% Inserta una captura si existe; en caso contrario muestra un recuadro pendiente.
 \newcommand{\evidencia}[3]{%
   \begin{figure}[H]
     \centering
     \IfFileExists{evidencias/#1}{%
-      \includegraphics[width=0.92\textwidth,height=0.68\textheight,keepaspectratio]{evidencias/#1}%
+      \includegraphics[draft=false,width=0.92\textwidth,height=0.68\textheight,keepaspectratio]{evidencias/#1}%
     }{%
       \fbox{\parbox[c][4.2cm][c]{0.86\textwidth}{\centering
       \textbf{Evidencia pendiente}\\[0.5em]
@@ -161,6 +160,10 @@ El archivo \texttt{docker-compose.yml} declara los servicios \texttt{db-cuenca} 
 
 La clase \texttt{DataSourceConfig} construye dos objetos \texttt{DataSource}. La configuración de conexión se encuentra en \texttt{application.yml}. El servicio \texttt{ConsultaDistribuidaService} crea un \texttt{JdbcTemplate} por sede y selecciona uno mediante los dos primeros caracteres del número de cuenta.
 
+El proyecto fue configurado en IntelliJ IDEA con Microsoft OpenJDK 21.0.11 y nivel de lenguaje 21, de acuerdo con los requisitos establecidos para la práctica.
+
+\evidencia{08_configuracion_jdk21.png}{Configuración del proyecto con JDK 21 y nivel de lenguaje 21 en IntelliJ IDEA.}{jdk21}
+
 \subsection{API REST}
 
 La clase \texttt{BancoController} publica los siguientes endpoints:
@@ -211,6 +214,7 @@ El contenedor de Quito fue detenido de manera controlada. Durante la interrupci�
 
 \evidencia{05_quito_detenido.png}{Nodo Quito detenido durante la prueba de fallos.}{quito-detenido}
 \evidencia{06_autonomia_cuenca.png}{Cuenca continúa respondiendo mientras Quito está detenido.}{autonomia-cuenca}
+\evidencia{07_quito_inaccesible.png}{La consulta dirigida a Quito devuelve HTTP 500 mientras su nodo está detenido.}{quito-inaccesible}
 
 \section{Análisis de resultados}
 

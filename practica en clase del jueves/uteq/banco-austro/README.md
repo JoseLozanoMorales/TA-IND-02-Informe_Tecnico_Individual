@@ -184,3 +184,7 @@ docker compose down -v
 | Base de datos Quito | `banco_quito` |
 
 Estas credenciales se utilizan únicamente con fines didácticos y no son apropiadas para un sistema de producción.
+
+## Informe en LaTeX
+
+El informe técnico realizado se encuentra en `informe/informe_practica.tex` e incorpora las ocho evidencias obtenidas durante la implementación y validación de la práctica. Puede compilarlo localmente con una distribución LaTeX o importalo directamente en Overleaf.
