@@ -164,6 +164,28 @@ El proyecto fue configurado en IntelliJ IDEA con Microsoft OpenJDK 21.0.11 y niv
 
 \evidencia{08_configuracion_jdk21.png}{Configuración del proyecto con JDK 21 y nivel de lenguaje 21 en IntelliJ IDEA.}{jdk21}
 
+\subsection{Justificación de diferencias respecto a la guía}
+
+La implementación conserva el comportamiento y los resultados solicitados en la guía, pero introduce pequeñas refactorizaciones para evitar configuración redundante y aprovechar las capacidades de Java 21. A continuación se justifican las diferencias principales.
+
+\subsubsection{Propiedad del controlador en \texttt{application.yml}}
+
+El listado de la guía incluye la propiedad \texttt{driver-class-name:}\allowbreak\ \texttt{org.postgresql.Driver} para cada fuente de datos. En este proyecto dicha línea se omitió porque \texttt{DataSourceConfig} establece explícitamente el mismo controlador mediante \texttt{driverClassName(}\allowbreak\texttt{"org.postgresql.Driver"}\allowbreak\texttt{)} al construir ambos objetos \texttt{DataSource}. La clase del controlador está disponible gracias a la dependencia de PostgreSQL declarada en Maven.
+
+La configuración utiliza el espacio de propiedades personalizado \texttt{datasources} y no la configuración automática singular \texttt{spring.datasource}. Además, \texttt{DataSourceConfig} inyecta únicamente URL, usuario y contraseña. Por ello, añadir \texttt{driver-class-name} al YAML sin inyectarlo también en la clase dejaría una propiedad no consumida. Su omisión evita duplicar una configuración que ya se aplica de forma centralizada y no altera las conexiones comprobadas con Cuenca y Quito.
+
+\subsubsection{Refactorización de \texttt{DataSourceConfig}}
+
+La guía inyecta URL, usuario y contraseña en seis campos de la clase y repite la construcción de cada fuente de datos. La versión implementada recibe esas propiedades directamente como parámetros de los métodos \texttt{dsCuenca} y \texttt{dsQuito}. De esta manera, las dependencias de cada bean quedan visibles en su declaración y no se requieren campos mutables de configuración.
+
+La lógica compartida se trasladó al método privado \texttt{construir}, que configura URL, credenciales y controlador en un único lugar. Esta decisión reduce duplicación: cualquier modificación común a las dos conexiones se realiza una sola vez. Los nombres de los beans, \texttt{dsCuenca} y \texttt{dsQuito}, permanecen idénticos a los de la guía, por lo que el uso de \texttt{@Qualifier} y el comportamiento de Spring no cambian.
+
+\subsubsection{Refactorización de \texttt{ConsultaDistribuidaService}}
+
+El servicio conserva las mismas consultas SQL, la unión de clientes y las reglas de enrutamiento: prefijo 22 para Cuenca y prefijo 17 para Quito. La diferencia se limita a expresar la respuesta de \texttt{consultarSaldo} mediante un operador condicional en lugar de un bloque \texttt{if}. Cuando la consulta no devuelve filas se construye el mismo mapa de error; cuando existe una fila se retorna el primer resultado.
+
+La guía obtiene esa fila con \texttt{get(0)}, mientras que la implementación usa \texttt{getFirst()}. Este método forma parte de la API disponible en Java 21, versión exigida por la práctica, y expresa directamente la intención de recuperar el primer elemento. También se escribió la consulta SQL como una sola cadena en vez de concatenar dos fragmentos. Estas diferencias mejoran concisión y legibilidad sin modificar el resultado funcional.
+
 \subsection{API REST}
 
 La clase \texttt{BancoController} publica los siguientes endpoints:
