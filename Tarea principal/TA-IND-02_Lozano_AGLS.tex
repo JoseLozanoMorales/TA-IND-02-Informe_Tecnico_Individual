@@ -50,19 +50,19 @@
 
 \begin{document}
 
-\begin{titlepage}
-  \centering
+\pagenumbering{arabic}
+\begin{center}
   {\large UNIVERSIDAD TÉCNICA ESTATAL DE QUEVEDO\par}
-  \vspace{0.4cm}
+  \vspace{0.1cm}
   {\large Facultad de Ciencias de la Computación\par}
   {\large Carrera de Ingeniería de Software\par}
-  \vfill
+  \vspace{0.35cm}
   {\Large\bfseries TA-IND-02\par}
-  \vspace{0.5cm}
+  \vspace{0.2cm}
   {\LARGE\bfseries Análisis de Consistencia y Replicación en Bases de Datos Distribuidas\par}
-  \vspace{0.4cm}
+  \vspace{0.2cm}
   {\Large Caso de estudio: AGLS -- TiendaTech\par}
-  \vfill
+  \vspace{0.4cm}
   \begin{tabular}{rl}
     \textbf{Estudiante:} & José Alejandro Lozano Morales \\
     \textbf{Equipo PFC:} & AGLS -- TiendaTech \\
@@ -72,22 +72,14 @@
     \textbf{Período:} & 2026--2027 \\
     \textbf{Fecha:} & 12 de julio de 2026
   \end{tabular}
-  \vfill
-\end{titlepage}
-
-\pagenumbering{arabic}
+\end{center}
+\vspace{0.25cm}
 
 \section*{Abstract}
-\addcontentsline{toc}{section}{Abstract}
 This report analyzes the consistency and replication model actually implemented in the AGLS--TiendaTech Final Course Project, a hardware e-commerce platform with a component compatibility assistant. Inspection of the source code and deployment configuration shows a single Spring Boot application connected to one PostgreSQL instance through one data source, with the data and stored routines concentrated in the \texttt{public} schema. Consequently, the current system has neither physical replicas nor an implemented schema-per-service separation. Its observable guarantees correspond to PostgreSQL's local transactional consistency, while its exact behavior under concurrent operations depends on the isolation level, locking strategy, and stored functions whose definitions are not included in the repository. The implemented model is compared with two alternatives: primary--follower replication with read replicas and automatic failover, and a database-per-service architecture coordinated through the Saga pattern. The analysis concludes that the current approach is reasonable for the academic stage because of its simplicity and local atomicity, but it is not optimal for production traffic due to its single point of failure. An incremental evolution toward primary--follower replication is recommended, preserving strong guarantees for inventory, orders, and payment operations.
 
 \section*{Resumen}
-\addcontentsline{toc}{section}{Resumen}
 El presente informe analiza el modelo de consistencia y replicación realmente implementado en el PFC AGLS--TiendaTech, una plataforma de comercio electrónico de hardware con asistente de compatibilidad. La inspección del código y del despliegue evidencia una aplicación Spring Boot conectada a una única instancia PostgreSQL, con una sola fuente de datos y uso generalizado del esquema \texttt{public}; por tanto, aún no existen réplicas físicas ni separación efectiva por esquemas. El sistema obtiene consistencia transaccional local del motor, pero sus garantías exactas frente a operaciones concurrentes dependen del aislamiento, los bloqueos y las funciones almacenadas, cuya definición no está incluida en el repositorio. Se contrasta este modelo con dos alternativas: replicación primario--seguidor con réplica de lectura y failover, y base de datos por servicio con coordinación mediante Saga. Se concluye que el modelo actual es razonable para la fase académica por su simplicidad y atomicidad local, pero no es óptimo para un despliegue real debido al punto único de fallo. Se recomienda una evolución incremental hacia primario--seguidor, manteniendo consistencia fuerte en inventario, pedidos y pagos.
-
-\clearpage
-\tableofcontents
-\clearpage
 
 \section{Introducción}
 
