@@ -77,9 +77,17 @@
 
 \pagenumbering{arabic}
 
+\section*{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+This report analyzes the consistency and replication model actually implemented in the AGLS--TiendaTech Final Course Project, a hardware e-commerce platform with a component compatibility assistant. Inspection of the source code and deployment configuration shows a single Spring Boot application connected to one PostgreSQL instance through one data source, with the data and stored routines concentrated in the \texttt{public} schema. Consequently, the current system has neither physical replicas nor an implemented schema-per-service separation. Its observable guarantees correspond to PostgreSQL's local transactional consistency, while its exact behavior under concurrent operations depends on the isolation level, locking strategy, and stored functions whose definitions are not included in the repository. The implemented model is compared with two alternatives: primary--follower replication with read replicas and automatic failover, and a database-per-service architecture coordinated through the Saga pattern. The analysis concludes that the current approach is reasonable for the academic stage because of its simplicity and local atomicity, but it is not optimal for production traffic due to its single point of failure. An incremental evolution toward primary--follower replication is recommended, preserving strong guarantees for inventory, orders, and payment operations.
+
 \section*{Resumen}
 \addcontentsline{toc}{section}{Resumen}
 El presente informe analiza el modelo de consistencia y replicación realmente implementado en el PFC AGLS--TiendaTech, una plataforma de comercio electrónico de hardware con asistente de compatibilidad. La inspección del código y del despliegue evidencia una aplicación Spring Boot conectada a una única instancia PostgreSQL, con una sola fuente de datos y uso generalizado del esquema \texttt{public}; por tanto, aún no existen réplicas físicas ni separación efectiva por esquemas. El sistema obtiene consistencia transaccional local del motor, pero sus garantías exactas frente a operaciones concurrentes dependen del aislamiento, los bloqueos y las funciones almacenadas, cuya definición no está incluida en el repositorio. Se contrasta este modelo con dos alternativas: replicación primario--seguidor con réplica de lectura y failover, y base de datos por servicio con coordinación mediante Saga. Se concluye que el modelo actual es razonable para la fase académica por su simplicidad y atomicidad local, pero no es óptimo para un despliegue real debido al punto único de fallo. Se recomienda una evolución incremental hacia primario--seguidor, manteniendo consistencia fuerte en inventario, pedidos y pagos.
+
+\clearpage
+\tableofcontents
+\clearpage
 
 \section{Introducción}
 
@@ -95,19 +103,21 @@ La pregunta orientadora es: \textbf{¿el modelo de consistencia elegido es ópti
 
 La consistencia distribuida representa un espectro de garantías y no una propiedad binaria \cite{viotti2016consistency}. La \emph{linealizabilidad} exige que cada operación parezca ocurrir instantáneamente entre su invocación y su respuesta, respetando el orden del tiempo real. La \emph{consistencia secuencial} conserva un orden total común para todos los procesos, pero no exige que dicho orden coincida con el tiempo real. La \emph{consistencia causal} preserva el orden de las operaciones causalmente relacionadas, mientras permite órdenes diferentes para operaciones concurrentes e independientes. Las garantías de sesión, como \emph{read-your-writes}, aseguran que un cliente observe sus propias modificaciones. Finalmente, la \emph{consistencia eventual} garantiza convergencia en ausencia de nuevas escrituras, sin prometer que una lectura inmediata obtenga el valor más reciente.
 
+En términos relativos, el orden general de mayor a menor fuerza semántica es linealizabilidad, consistencia secuencial, consistencia causal, garantías de sesión como \emph{read-your-writes} y consistencia eventual. Cuanto más fuerte es el modelo, mayor coordinación se requiere para ordenar y hacer visibles las operaciones, lo que normalmente incrementa la latencia y puede reducir la disponibilidad durante fallos o particiones; los modelos más débiles admiten respuestas con menor coordinación y mayor disponibilidad, a cambio de posibles lecturas obsoletas o divergencias temporales.
+
 Estas definiciones se aplican principalmente cuando existen varias copias de un dato. En una base de datos con una sola copia no existe divergencia entre réplicas ni retraso de propagación. No obstante, aún es necesario analizar el aislamiento entre transacciones concurrentes. PostgreSQL ofrece atomicidad, consistencia, aislamiento y durabilidad (ACID), pero el nivel de aislamiento determina qué anomalías pueden observarse. Una transacción ejecutada bajo \texttt{READ COMMITTED} no equivale automáticamente a una ejecución serializable ni permite afirmar que toda la aplicación sea linealizable.
 
 \subsection{CAP y PACELC}
 
 El teorema CAP formaliza que, cuando se produce una partición de red, un sistema replicado no puede garantizar simultáneamente disponibilidad para todas las solicitudes y una vista consistente de los datos \cite{gilbert2002brewer}. La formulación no significa que un sistema elija permanentemente dos letras de tres; describe la decisión que debe tomar durante una partición.
 
-PACELC amplía el análisis: si existe una partición, se elige entre disponibilidad y consistencia; de lo contrario, en operación normal, se elige entre latencia y consistencia \cite{abadi2012pacelc}. Dynamo representa una decisión orientada a disponibilidad y convergencia eventual \cite{decandia2007dynamo}, mientras Spanner emplea coordinación y sincronización temporal para ofrecer consistencia externa global \cite{corbett2013spanner}. En una instancia única, CAP no se manifiesta como un conflicto entre réplicas: ante la pérdida de acceso al único nodo, el servicio queda indisponible. PACELC tampoco presenta todavía un intercambio de latencia por coordinación entre copias, aunque sí existen costos de bloqueo y contención entre transacciones.
+PACELC amplía el análisis: si existe una partición, se elige entre disponibilidad y consistencia; de lo contrario, en operación normal, se elige entre latencia y consistencia. Una revisión abierta reciente confirma que este compromiso surge de la coordinación y sincronización necesarias entre réplicas, las cuales agregan latencia a las garantías fuertes \cite{ahmed2023tradeoffs}. Dynamo representa una decisión orientada a disponibilidad y convergencia eventual \cite{decandia2007dynamo}, mientras Spanner emplea coordinación y sincronización temporal para ofrecer consistencia externa global \cite{corbett2013spanner}. En una instancia única, CAP no se manifiesta como un conflicto entre réplicas: ante la pérdida de acceso al único nodo, el servicio queda indisponible. PACELC tampoco presenta todavía un intercambio de latencia por coordinación entre copias, aunque sí existen costos de bloqueo y contención entre transacciones.
 
 \subsection{Estrategias de replicación}
 
 En la replicación primario--seguidor, un nodo acepta las escrituras y propaga sus cambios a uno o más seguidores. La propagación síncrona reduce el riesgo de pérdida y puede sostener garantías fuertes, pero añade latencia a cada confirmación. La propagación asíncrona reduce la latencia de escritura, aunque las lecturas dirigidas a seguidores pueden ser obsoletas. Las propuestas recientes intentan reducir este compromiso mediante nuevas topologías y paralelismo sin renunciar a la consistencia fuerte \cite{altukhaim2022multidirectional}.
 
-En la replicación multilíder, varios nodos aceptan escrituras y requieren resolución de conflictos. En los sistemas sin líder, las lecturas y escrituras se realizan sobre subconjuntos de réplicas. Los quórums permiten obtener consistencia fuerte y tolerancia a fallos cuando se coordinan adecuadamente; QuorumX, por ejemplo, combina replicación de logs y reproducción eficiente para cargas OLTP \cite{wang2022quorumx}. Estas estrategias aumentan la disponibilidad, pero también la complejidad de operación, monitoreo, recuperación y pruebas.
+En la replicación multilíder, varios nodos aceptan escrituras y requieren resolución de conflictos. En los sistemas sin líder, las lecturas y escrituras se realizan sobre subconjuntos de réplicas. Los quórums permiten obtener consistencia fuerte y tolerancia a fallos cuando se coordinan adecuadamente; QuorumX, por ejemplo, combina replicación de logs y reproducción eficiente para cargas OLTP \cite{wang2022quorumx}. Una propuesta abierta de 2025 emplea votación binaria sobre una organización lógica en cuadrícula para disminuir el costo de comunicación sin abandonar la consistencia fuerte \cite{fauzi2025bvac}. Estas estrategias aumentan la disponibilidad, pero también la complejidad de operación, monitoreo, recuperación y pruebas.
 
 \subsection{Separación lógica y distribución física}
 
@@ -147,7 +157,8 @@ También se observa un solo proyecto Maven, un solo artefacto Spring Boot y un s
     \node[plan,right=7mm of users] (sales) {ventas};
     \node[plan,right=7mm of inventory] (suppliers) {proveedores};
     \node[draw,dashed,fit=(users)(products)(inventory)(orders)(sales)(suppliers),inner sep=4mm,label=above:{\small Evolución planificada, aún no implementada}] (future) {};
-    \draw[dashed,-{Latex[length=2mm]}] (pg.east) -- node[above,sloped]{separación lógica futura} (future.west);
+    \draw[dashed,-{Latex[length=2mm]}] (pg.east) --
+      node[above,align=center,font=\scriptsize]{separación lógica\\futura} (future.west);
   \end{tikzpicture}
   \caption{Topología propia basada en la evidencia del repositorio: instancia única y esquema \texttt{public}; a la derecha se representa la separación lógica planificada.}
   \label{fig:topologia-actual}
@@ -175,7 +186,7 @@ Los requisitos tampoco son homogéneos. Inventario, confirmación de pedidos, pa
 
 \subsection{Alternativa A: primario--seguidor con failover}
 
-La primera alternativa conserva una sola fuente autorizada para escrituras y añade uno o más seguidores mediante streaming replication. El checkout, inventario, pagos y pedidos se ejecutan en el primario. Las consultas tolerantes a obsolescencia, como catálogo o reportes, pueden dirigirse a un seguidor. Estudios experimentales muestran que los niveles de consistencia elegidos en bases NoSQL y distribuidas afectan directamente latencia y rendimiento \cite{ferreira2025benchmarking}; por ello, el enrutamiento debe decidirse por operación, no globalmente.
+La primera alternativa conserva una sola fuente autorizada para escrituras y añade uno o más seguidores mediante streaming replication. El checkout, inventario, pagos y pedidos se ejecutan en el primario. Las consultas tolerantes a obsolescencia, como catálogo o reportes, pueden dirigirse a un seguidor. El sistema verificable GroveKV demuestra que una arquitectura primario--respaldo puede ejecutar lecturas sobre réplicas mediante arrendamientos, recuperarse de fallos y aumentar su rendimiento al incorporar nodos de respaldo \cite{sharma2023grove}; por ello, el enrutamiento debe decidirse por operación y garantía requerida, no globalmente.
 
 Una réplica asíncrona reduce el costo de las escrituras, pero puede devolver valores atrasados. No debe utilizarse para verificar stock inmediatamente antes de vender. Una réplica síncrona disminuye la ventana de pérdida, aunque incrementa la latencia. Para resolver el punto único de fallo no basta una réplica de lectura: se requiere promoción automática, monitoreo y un mecanismo de redirección. Esta alternativa es incremental y mantiene la ventaja de las transacciones locales.
 
@@ -204,7 +215,7 @@ Adecuación & Fase académica y tráfico reducido & Mejor evolución a corto y m
 \end{tabularx}
 \end{table}
 
-La Tabla~\ref{tab:comparacion} muestra que la alternativa A ofrece el mejor equilibrio inmediato. Las arquitecturas recientes también demuestran que es posible combinar replicación, consistencia fuerte y alto rendimiento mediante diseños especializados \cite{krechowicz2025layered}, pero su complejidad no se justifica todavía en TiendaTech. La consistencia eventual estudiada en entornos de sincronización distribuida \cite{zhao2025acc} resulta más apropiada para datos tolerantes a retraso que para la confirmación de inventario y cobro.
+La Tabla~\ref{tab:comparacion} muestra que la alternativa A ofrece el mejor equilibrio inmediato. Las arquitecturas recientes también demuestran que es posible combinar replicación, consistencia fuerte y alto rendimiento mediante diseños especializados \cite{krechowicz2025layered}, pero su complejidad no se justifica todavía en TiendaTech. La literatura reciente identifica los modelos causales y eventuales como alternativas capaces de equilibrar ordenamiento, disponibilidad y rendimiento \cite{ahmed2023tradeoffs}; en TiendaTech resultan más apropiados para datos tolerantes a retraso que para la confirmación de inventario y cobro.
 
 \section{Discusión crítica}
 
@@ -231,7 +242,7 @@ En síntesis, la postura adoptada es que la instancia única debe mantenerse dur
 
 \section{Declaración de uso de IA generativa}
 
-Para la preparación de este informe se utilizaron Claude y OpenAI Codex como herramientas de apoyo. Claude fue empleado previamente para organizar y mejorar la claridad de un borrador inicial. OpenAI Codex se utilizó para inspeccionar la estructura del repositorio de TiendaTech, localizar evidencia de configuración de base de datos y transacciones, contrastar dicha evidencia con la documentación previa, proponer la estructura en LaTeX y revisar la coherencia técnica del texto. Las herramientas asistieron en el resumen, marco teórico, análisis, tabla comparativa y redacción. La selección de la postura, la validación de las afirmaciones sobre el PFC y la responsabilidad por el contenido final corresponden al autor, quien debe revisar el documento antes de entregarlo.
+La redacción y la revisión inicial de la documentación y del código del PFC, realizadas con el propósito de obtener la información necesaria para esta tarea, fueron desarrolladas por el autor. Posteriormente, se utilizó ChatGPT, de OpenAI, como herramienta de apoyo para pulir la claridad y la coherencia de la redacción, organizar la estructura del documento en LaTeX y revisar la presentación del resumen, el marco teórico, el análisis técnico, la tabla comparativa, la discusión y las conclusiones. Las fuentes académicas empleadas fueron buscadas y seleccionadas inicialmente por el autor; la inteligencia artificial se utilizó como apoyo para comprobar sus datos bibliográficos, la correspondencia de los DOI y su pertinencia respecto del tema de consistencia y replicación. La interpretación del PFC, la postura crítica adoptada y la responsabilidad por el contenido final corresponden al autor.
 
 \printbibliography
 
