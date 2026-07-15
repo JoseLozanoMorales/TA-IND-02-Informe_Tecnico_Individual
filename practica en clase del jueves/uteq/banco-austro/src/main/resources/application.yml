@@ -14,3 +14,7 @@ datasources:
     url: jdbc:postgresql://localhost:5443/banco_quito
     username: banco
     password: banco123
+  guayaquil:
+    url: jdbc:postgresql://localhost:5444/banco_guayaquil
+    username: banco
+    password: banco123

@@ -29,6 +29,21 @@ services:
     networks:
       - bda-net
 
+  db-guayaquil:
+    image: postgres:16-alpine
+    container_name: banco-guayaquil
+    environment:
+      POSTGRES_DB: banco_guayaquil
+      POSTGRES_USER: banco
+      POSTGRES_PASSWORD: banco123
+    ports:
+      - "5444:5432"
+    volumes:
+      - vol-guayaquil:/var/lib/postgresql/data
+      - ./sql-guayaquil:/docker-entrypoint-initdb.d
+    networks:
+      - bda-net
+
 networks:
   bda-net:
     driver: bridge
@@ -36,3 +51,4 @@ networks:
 volumes:
   vol-cuenca:
   vol-quito:
+  vol-guayaquil:

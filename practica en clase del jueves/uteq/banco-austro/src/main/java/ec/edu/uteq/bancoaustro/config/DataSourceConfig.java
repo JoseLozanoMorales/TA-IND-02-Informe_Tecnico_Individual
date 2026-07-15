@@ -1,6 +1,7 @@
 package ec.edu.uteq.bancoaustro.config;
 
 import javax.sql.DataSource;
+import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
@@ -22,8 +23,22 @@ public class DataSourceConfig {
         return construir(url, username, password);
     }
 
+    @Bean(name = "dsGuayaquil")
+    DataSource dsGuayaquil(@Value("${datasources.guayaquil.url}") String url,
+                           @Value("${datasources.guayaquil.username}") String username,
+                           @Value("${datasources.guayaquil.password}") String password) {
+        return construir(url, username, password);
+    }
+
     private DataSource construir(String url, String username, String password) {
-        return DataSourceBuilder.create().url(url).username(username).password(password)
-                .driverClassName("org.postgresql.Driver").build();
+        HikariDataSource dataSource = DataSourceBuilder.create()
+                .type(HikariDataSource.class)
+                .url(url)
+                .username(username)
+                .password(password)
+                .driverClassName("org.postgresql.Driver")
+                .build();
+        dataSource.setConnectionTimeout(3000);
+        return dataSource;
     }
 }
